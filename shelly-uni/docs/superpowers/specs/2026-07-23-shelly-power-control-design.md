@@ -45,6 +45,9 @@ Node.js.
 
 - Persist the selected mode in KVS, restoring it after a script/device restart.
 - Default to `TIMER` when no persisted mode is present.
+- KVS restoration is asynchronous in the Shelly adapter. On startup the
+  controller must not command either output until the KVS read callback returns
+  (or reports an error), then it applies the restored mode or TIMER fallback.
 - Enforce output ordering: enabling uses `switch:0` then `switch:1`; disabling
   uses `switch:1` then `switch:0`.
 - Mode transitions increment a mode generation; every TIMER wake increments a
