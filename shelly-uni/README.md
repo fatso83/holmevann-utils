@@ -2,7 +2,7 @@
 
 This project controls the 12 V BatteryProtect/load bus and the inverter remote
 input on a Shelly Plus Uni. The generated deployment script is
-`../dist/shelly-power-control.js`.
+`dist/shelly-power-control.js`.
 
 | Output | Shelly component | Purpose |
 | --- | --- | --- |
