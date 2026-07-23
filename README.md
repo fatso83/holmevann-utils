@@ -6,49 +6,17 @@ of holmevann that is not the [actual homepage](https://github.com/fatso83/holmev
 This could be code or settings for 
 
 # Shelly Uni
+> smart relay, capable of running on 9-30 VDC and switching two output relays
 
-> Smart relay, capable of running on 9–30 VDC and switching two output relays.
+Responsible for 
 
-The Shelly Plus Uni controls the Victron BatteryProtect/common 12 V bus and
-the Phoenix inverter remote input. The paste-ready script is generated at
-`dist/shelly-power-control.js`.
+- handle button clicks 
+- turning on/off the Victron BatteryProtect for 12V consumers (BP)
+- turning on/off the Victron Phoenix 220V AC inverter (*)
+- power cycling the BP: every 2 hours it stays on for 10 minutes between 8 and 22
+- checking an API to see if it should stay on
 
-| Output | Shelly component | Purpose |
-| --- | --- | --- |
-| 12 V bus | `switch:0` | BatteryProtect and common 12 V loads |
-| Inverter | `switch:1` | Phoenix inverter remote input |
-
-The controller always enables 12 V before the inverter, and disables the
-inverter before 12 V.
-
-## Button controls
-
-`input:0` must be configured as a detached momentary button. A short press is
-resolved after a one-second double-press window; holding it for two seconds
-enters TIMER mode.
-
-| Current state | Single press | Double press | Two-second hold |
-| --- | --- | --- | --- |
-| TIMER/off | Manual 12 V | Manual full: 12 V + inverter | No-op |
-| Manual 12 V | No-op | Manual full: 12 V + inverter | TIMER/off |
-| Manual full | Manual 12 V | No-op | TIMER/off |
-
-Manual states cancel and ignore all timer/poll callbacks. TIMER starts with
-both outputs off, wakes the 12 V bus after 60 minutes, keeps it on for at least
-10 minutes, and polls the remote endpoint every 60 seconds while the bus is on.
-Only `KEEP_ON` extends a wake; `DEFAULT`, malformed responses, errors, and a
-30-second request timeout allow normal shutdown.
-
-## Development
-
-Run the deterministic test suite and build the script:
-
-```bash
-npm test
-npm run build
-```
-
-Paste `dist/shelly-power-control.js` into the Shelly Script editor.
+* this also has an interlock relay to the 12V to make sure that turning off 12V consumers will also turn off the inverter 
 
 # Teltonika RUT241 4G router
 Responsible for 
