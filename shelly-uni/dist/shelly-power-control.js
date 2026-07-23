@@ -229,6 +229,11 @@ function createShellyAdapter(platform, createController) {
       });
       return;
     }
+    if (name === 'double_push') {
+      clearPendingSingle();
+      controller.doublePress();
+      return;
+    }
     if (isLongPress(name)) {
       clearPendingSingle();
       controller.longPress();

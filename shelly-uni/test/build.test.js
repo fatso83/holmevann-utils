@@ -90,8 +90,13 @@ test('adapter recognizes input:0 single, double, and long button presses', funct
   assert.equal(platform.timers[1].cleared, true);
   assert.deepEqual(spy.calls.map(function (call) { return call.type; }), ['start', 'shortPress', 'doublePress']);
 
+  platform.emit({ component: 'input:0', info: { event: 'single_push' } });
+  platform.emit({ component: 'input:0', info: { event: 'double_push' } });
+  assert.equal(platform.timers[2].cleared, true);
+  assert.deepEqual(spy.calls.map(function (call) { return call.type; }), ['start', 'shortPress', 'doublePress', 'doublePress']);
+
   platform.emit({ component: 'input:0', info: { event: 'long_press' } });
-  assert.deepEqual(spy.calls.map(function (call) { return call.type; }), ['start', 'shortPress', 'doublePress', 'longPress']);
+  assert.deepEqual(spy.calls.map(function (call) { return call.type; }), ['start', 'shortPress', 'doublePress', 'doublePress', 'longPress']);
 });
 
 test('generated Shelly bundle uses no CommonJS loader or modern JavaScript syntax', function () {
