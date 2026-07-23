@@ -105,6 +105,36 @@ test('doublePress selects and persists MANUAL_FULL with bus before inverter', fu
   assert.deepEqual(kvsWrites(runtime), [{ type: 'kvsSet', key: 'power_mode', value: MANUAL_FULL }]);
 });
 
+test('only TIMER accepts short and double presses', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: MANUAL_12V } });
+  var controller = restore(runtime);
+  var beforeCommands = runtime.commandHistory();
+  var beforeTimers = runtime.timers.slice();
+
+  controller.shortPress();
+  controller.doublePress();
+  runtime.advance(0);
+
+  assert.deepEqual(runtime.commandHistory(), beforeCommands);
+  assert.deepEqual(runtime.timers, beforeTimers);
+  assert.deepEqual(runtime.outputState(), { 0: true, 1: false });
+});
+
+test('only manual modes accept a long press', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
+  var controller = restore(runtime);
+  var beforeCommands = runtime.commandHistory();
+  var beforeTimers = runtime.timers.slice();
+
+  controller.longPress();
+  runtime.advance(0);
+
+  assert.deepEqual(runtime.commandHistory(), beforeCommands);
+  assert.deepEqual(runtime.timers, beforeTimers);
+  runtime.advance(HOUR);
+  assert.deepEqual(runtime.outputState(), { 0: true, 1: false });
+});
+
 test('longPress enters TIMER off, persists it, and first wakes exactly one hour later', function () {
   var runtime = new FakeRuntime({ kvs: { power_mode: MANUAL_FULL } });
   var controller = restore(runtime);
@@ -132,9 +162,7 @@ test('TIMER polling and deadline behavior start only after its scheduled wake', 
   runtime.advance(9 * 60000);
   assert.equal(runtime.outputState()[0], true);
 
-  controller.longPress();
-  runtime.advance(0);
-  assert.deepEqual(runtime.outputState(), { 0: false, 1: false });
+  assert.deepEqual(runtime.outputState(), { 0: true, 1: false });
 });
 
 test('TIMER polls every minute only while its scheduled-wake bus is on', function () {
