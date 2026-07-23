@@ -146,7 +146,7 @@ FakeRuntime.prototype.httpGet = function (url, callback) {
   var outcome = this.httpOutcomes.length ? this.httpOutcomes.shift() : { error: 'No HTTP outcome queued' };
   this.commands.push({ type: 'httpGet', url: url });
   if (outcome && outcome.hang) return;
-  this.setTimer(0, false, function () {
+  this.setTimer(outcome && outcome.delay || 0, false, function () {
     if (outcome && Object.prototype.hasOwnProperty.call(outcome, 'error')) {
       callback(outcome.error, null);
     } else {
