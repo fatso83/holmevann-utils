@@ -10,7 +10,9 @@ var POLL_INTERVAL_MS = 60 * 1000;
 var REQUEST_TIMEOUT_MS = 30 * 1000;
 var REMOTE_URL = 'https://api.holmevann.no/power/remote';
 
-function createController(runtime) {
+function createController(runtime, options) {
+  options = options || {};
+  var pollingEnabled = options.pollingEnabled === true;
   var mode = TIMER;
   var initialized = false;
   var modeId = 0;
@@ -106,10 +108,12 @@ function createController(runtime) {
       deadlineTimer = null;
       if (!keepOn) turnBusOff();
     });
-    pollTimer = clearTimer(pollTimer);
-    pollTimer = runtime.setTimer(POLL_INTERVAL_MS, true, function () {
-      if (isCurrentCycle(expectedModeId, thisCycleId) && busOn) poll(expectedModeId, thisCycleId);
-    });
+    if (pollingEnabled) {
+      pollTimer = clearTimer(pollTimer);
+      pollTimer = runtime.setTimer(POLL_INTERVAL_MS, true, function () {
+        if (isCurrentCycle(expectedModeId, thisCycleId) && busOn) poll(expectedModeId, thisCycleId);
+      });
+    }
   }
 
   function removeRequestTimeout(timerId) {

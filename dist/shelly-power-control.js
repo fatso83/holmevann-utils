@@ -14,7 +14,9 @@ var POLL_INTERVAL_MS = 60 * 1000;
 var REQUEST_TIMEOUT_MS = 30 * 1000;
 var REMOTE_URL = 'https://api.holmevann.no/power/remote';
 
-function createController(runtime) {
+function createController(runtime, options) {
+  options = options || {};
+  var pollingEnabled = options.pollingEnabled === true;
   var mode = TIMER;
   var initialized = false;
   var modeId = 0;
@@ -110,10 +112,12 @@ function createController(runtime) {
       deadlineTimer = null;
       if (!keepOn) turnBusOff();
     });
-    pollTimer = clearTimer(pollTimer);
-    pollTimer = runtime.setTimer(POLL_INTERVAL_MS, true, function () {
-      if (isCurrentCycle(expectedModeId, thisCycleId) && busOn) poll(expectedModeId, thisCycleId);
-    });
+    if (pollingEnabled) {
+      pollTimer = clearTimer(pollTimer);
+      pollTimer = runtime.setTimer(POLL_INTERVAL_MS, true, function () {
+        if (isCurrentCycle(expectedModeId, thisCycleId) && busOn) poll(expectedModeId, thisCycleId);
+      });
+    }
   }
 
   function removeRequestTimeout(timerId) {
@@ -184,6 +188,8 @@ module.exports.TIMER = TIMER;
 'use strict';
 
 var DOUBLE_PRESS_WINDOW_MS = 1000;
+// Set to true to re-enable remote KEEP_ON/DEFAULT polling in TIMER wakes.
+var POLLING_ENABLED = false;
 
 function createShellyAdapter(platform, createController) {
   var pendingSingleTimer = null;
@@ -263,7 +269,7 @@ function createShellyAdapter(platform, createController) {
 
   return {
     start: function () {
-      controller = createController(runtime());
+      controller = createController(runtime(), { pollingEnabled: POLLING_ENABLED });
       platform.Shelly.addEventHandler(handleEvent);
       controller.start();
     }

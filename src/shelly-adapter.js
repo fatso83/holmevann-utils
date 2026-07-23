@@ -1,6 +1,8 @@
 'use strict';
 
 var DOUBLE_PRESS_WINDOW_MS = 1000;
+// Set to true to re-enable remote KEEP_ON/DEFAULT polling in TIMER wakes.
+var POLLING_ENABLED = false;
 
 function createShellyAdapter(platform, createController) {
   var pendingSingleTimer = null;
@@ -80,7 +82,7 @@ function createShellyAdapter(platform, createController) {
 
   return {
     start: function () {
-      controller = createController(runtime());
+      controller = createController(runtime(), { pollingEnabled: POLLING_ENABLED });
       platform.Shelly.addEventHandler(handleEvent);
       controller.start();
     }

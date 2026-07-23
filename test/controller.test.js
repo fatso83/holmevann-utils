@@ -10,14 +10,14 @@ var MANUAL_FULL = 'MANUAL_FULL';
 var TIMER = 'TIMER';
 var HOUR = 60 * 60 * 1000;
 
-function start(runtime) {
-  var controller = createController(runtime);
+function start(runtime, options) {
+  var controller = createController(runtime, options);
   controller.start();
   return controller;
 }
 
-function restore(runtime) {
-  var controller = start(runtime);
+function restore(runtime, options) {
+  var controller = start(runtime, options);
   runtime.resolveKvsGet();
   runtime.advance(0);
   return controller;
@@ -155,10 +155,17 @@ test('longPress enters TIMER off, persists it, and first wakes exactly one hour 
   assert.deepEqual(runtime.outputState(), { 0: true, 1: false });
 });
 
+test('TIMER polling is disabled by default', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
+  restore(runtime);
+  runtime.advance(HOUR + 10 * 60000);
+  assert.equal(httpGets(runtime).length, 0);
+});
+
 test('TIMER polling and deadline behavior start only after its scheduled wake', function () {
   var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
   for (var count = 0; count < 10; count += 1) runtime.enqueueHttp({ response: { body: '  KEEP_ON\n' } });
-  var controller = restore(runtime);
+  var controller = restore(runtime, { pollingEnabled: true });
 
   runtime.advance(HOUR - 1);
   assert.equal(httpGets(runtime).length, 0);
@@ -175,7 +182,7 @@ test('TIMER polling and deadline behavior start only after its scheduled wake', 
 
 test('TIMER polls every minute only while its scheduled-wake bus is on', function () {
   var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
-  restore(runtime);
+  restore(runtime, { pollingEnabled: true });
 
   runtime.advance(HOUR + 59999);
   assert.equal(httpGets(runtime).length, 0);
@@ -197,7 +204,7 @@ test('DEFAULT, malformed, error, and hung scheduled-wake poll results use the de
   ].forEach(function (outcome) {
     var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
     runtime.enqueueHttp(outcome);
-    restore(runtime);
+    restore(runtime, { pollingEnabled: true });
     runtime.advance(HOUR + 10 * 60000);
     assert.equal(runtime.outputState()[0], false);
   });
@@ -206,7 +213,7 @@ test('DEFAULT, malformed, error, and hung scheduled-wake poll results use the de
 test('a scheduled-wake request times out after 30 seconds and ignores a late KEEP_ON reply', function () {
   var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
   runtime.enqueueHttp({ delay: 31000, response: { body: 'KEEP_ON' } });
-  restore(runtime);
+  restore(runtime, { pollingEnabled: true });
 
   runtime.advance(HOUR + 60000 + 30000);
   runtime.advance(9 * 60000);
@@ -218,7 +225,7 @@ test('a scheduled-wake request times out after 30 seconds and ignores a late KEE
 test('manual modes cancel and ignore stale TIMER wake, poll, deadline, and HTTP callbacks', function () {
   var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
   runtime.enqueueHttp({ delay: 31000, response: { body: 'KEEP_ON' } });
-  var controller = restore(runtime);
+  var controller = restore(runtime, { pollingEnabled: true });
   var staleWake = runtime.timers.filter(function (timer) { return timer.repeat && timer.delay === HOUR; })[0];
 
   runtime.advance(HOUR + 60000);
@@ -237,7 +244,7 @@ test('manual modes cancel and ignore stale TIMER wake, poll, deadline, and HTTP 
 
 test('a persisted manual mode survives restart and never schedules TIMER work', function () {
   var runtime = new FakeRuntime({ kvs: { power_mode: MANUAL_FULL } });
-  restore(runtime);
+  restore(runtime, { pollingEnabled: true });
   runtime.advance(2 * HOUR);
   assert.deepEqual(runtime.outputState(), { 0: true, 1: true });
   assert.equal(httpGets(runtime).length, 0);
