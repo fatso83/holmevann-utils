@@ -25,10 +25,12 @@ enters TIMER mode.
 | Manual full | Manual 12 V | No-op | TIMER/off |
 
 Manual states cancel and ignore all timer/poll callbacks. TIMER starts with
-both outputs off, wakes the 12 V bus after 60 minutes, keeps it on for at least
-10 minutes, and polls the remote endpoint every 60 seconds while the bus is on.
-Only `KEEP_ON` extends a wake; `DEFAULT`, malformed responses, errors, and a
-30-second request timeout allow normal shutdown.
+both outputs off, wakes the 12 V bus after 60 minutes, and keeps it on for at
+least 10 minutes. Remote polling is currently disabled. To re-enable it, set
+`POLLING_ENABLED` to `true` in `src/shelly-adapter.js` and rebuild; the retained
+polling behavior checks the remote endpoint every 60 seconds while the bus is
+on. Only `KEEP_ON` extends a wake; `DEFAULT`, malformed responses, errors, and
+a 30-second request timeout allow normal shutdown.
 
 ## Development
 
