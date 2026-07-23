@@ -33,8 +33,13 @@ Node.js.
 - The plain-text body `KEEP_ON` keeps the bus on beyond its minimum duration.
 - The plain-text body `DEFAULT` allows the bus to turn off once the minimum
   duration has elapsed.
-- HTTP failures, malformed replies, and timeouts act as `DEFAULT`: they must
-  never indefinitely keep the 12 V bus on.
+- HTTP failures, malformed replies, and requests without a response within 30
+  seconds act as `DEFAULT`: they must never indefinitely keep the 12 V bus on.
+- Compare a successful response after trimming leading and trailing whitespace;
+  only `KEEP_ON` has the keep-on effect. Any other body is `DEFAULT`.
+- A scheduled 60-minute wake always starts a fresh TIMER cycle. If the bus is
+  already on because the prior cycle received `KEEP_ON`, it remains on and the
+  fresh cycle resets the minimum-on deadline to ten minutes after that wake.
 
 ## State and safety semantics
 
@@ -42,9 +47,11 @@ Node.js.
 - Default to `TIMER` when no persisted mode is present.
 - Enforce output ordering: enabling uses `switch:0` then `switch:1`; disabling
   uses `switch:1` then `switch:0`.
-- Each activation, mode transition, and HTTP request receives a monotonically
-  increasing generation token. Timer and HTTP callbacks only mutate outputs
-  when their token is current. This makes delayed/stale callbacks harmless.
+- Mode transitions increment a mode generation; every TIMER wake increments a
+  cycle generation; every HTTP request has its own request token. A callback
+  must match the mode and cycle for which it was created (and HTTP replies must
+  also match their request token). Thus a newer poll cannot invalidate the
+  cycle's minimum-off timer, while callbacks from old modes/cycles are harmless.
 - Repeated button events are processed as repeated toggles; they must neither
   duplicate timers nor permit an old cycle to change current outputs.
 
