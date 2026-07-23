@@ -18,10 +18,11 @@ function FakeRuntime(options) {
 }
 
 FakeRuntime.prototype.setTimer = function (delay, repeat, callback) {
+  delay = Math.max(0, Number(delay) || 0);
   var timer = {
     id: this.nextTimerId++,
-    delay: repeat ? Math.max(1, Number(delay) || 0) : Math.max(0, Number(delay) || 0),
-    due: this.now + Math.max(0, Number(delay) || 0),
+    delay: repeat ? Math.max(1, delay) : delay,
+    due: this.now + delay,
     repeat: Boolean(repeat),
     callback: callback,
     order: this.nextRegistrationOrder++,

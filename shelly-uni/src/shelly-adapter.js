@@ -27,22 +27,16 @@ function createShellyAdapter(platform, createController) {
   }
 
   function handleEvent(event) {
-    var name;
     if (!event || event.component !== 'input:0') return;
-    name = eventName(event);
-    if (name === 'single_push') {
-      if (pendingSingleTimer !== null) {
-        clearPendingSingle();
-        controller.doublePress();
-        return;
-      }
+    var name = eventName(event);
+    if (name === 'single_push' && pendingSingleTimer === null) {
       pendingSingleTimer = platform.Timer.set(DOUBLE_PRESS_WINDOW_MS, false, function () {
         pendingSingleTimer = null;
         controller.shortPress();
       });
       return;
     }
-    if (name === 'double_push') {
+    if (name === 'single_push' || name === 'double_push') {
       clearPendingSingle();
       controller.doublePress();
       return;

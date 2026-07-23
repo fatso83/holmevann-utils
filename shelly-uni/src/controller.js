@@ -11,8 +11,7 @@ var REQUEST_TIMEOUT_MS = 30 * 1000;
 var REMOTE_URL = 'https://api.holmevann.no/power/remote';
 
 function createController(runtime, options) {
-  options = options || {};
-  var pollingEnabled = options.pollingEnabled === true;
+  var pollingEnabled = Boolean(options && options.pollingEnabled === true);
   var mode = TIMER;
   var initialized = false;
   var modeId = 0;
@@ -21,7 +20,7 @@ function createController(runtime, options) {
   var wakeTimer = null;
   var deadlineTimer = null;
   var pollTimer = null;
-  var requestTimeoutTimers = [];
+  var requestTimeoutTimer = null;
   var busOn = false;
   var keepOn = false;
 
@@ -30,18 +29,11 @@ function createController(runtime, options) {
     return null;
   }
 
-  function clearRequestTimeouts() {
-    requestTimeoutTimers.forEach(function (timerId) { runtime.clearTimer(timerId); });
-    requestTimeoutTimers = [];
-  }
-
   function stopTimerMode() {
     wakeTimer = clearTimer(wakeTimer);
     deadlineTimer = clearTimer(deadlineTimer);
     pollTimer = clearTimer(pollTimer);
-    clearRequestTimeouts();
-    cycleId += 1;
-    requestId += 1;
+    requestTimeoutTimer = clearTimer(requestTimeoutTimer);
     busOn = false;
     keepOn = false;
   }
@@ -62,15 +54,9 @@ function createController(runtime, options) {
       return;
     }
 
-    if (mode === MANUAL_12V) {
-      runtime.setOutput(1, false);
-      runtime.setOutput(0, true);
-      return;
-    }
-
     runtime.setOutput(1, false);
-    runtime.setOutput(0, false);
-    scheduleWake(modeId);
+    runtime.setOutput(0, mode === MANUAL_12V);
+    if (mode === TIMER) scheduleWake(modeId);
   }
 
   function scheduleWake(expectedModeId) {
@@ -116,25 +102,21 @@ function createController(runtime, options) {
     }
   }
 
-  function removeRequestTimeout(timerId) {
-    requestTimeoutTimers = requestTimeoutTimers.filter(function (id) { return id !== timerId; });
-  }
-
   function poll(expectedModeId, expectedCycleId) {
     var thisRequestId = ++requestId;
     var timeoutTimer = runtime.setTimer(REQUEST_TIMEOUT_MS, false, function () {
-      removeRequestTimeout(timeoutTimer);
+      if (requestTimeoutTimer === timeoutTimer) requestTimeoutTimer = null;
       if (isCurrentRequest(expectedModeId, expectedCycleId, thisRequestId)) {
         requestId += 1;
-        applyPollResult('DEFAULT');
+        applyPollResponse();
       }
     });
-    requestTimeoutTimers.push(timeoutTimer);
+    requestTimeoutTimer = timeoutTimer;
     runtime.httpGet(REMOTE_URL, function (error, response) {
       if (!isCurrentRequest(expectedModeId, expectedCycleId, thisRequestId)) return;
       runtime.clearTimer(timeoutTimer);
-      removeRequestTimeout(timeoutTimer);
-      applyPollResult(error ? 'DEFAULT' : responseValue(response));
+      requestTimeoutTimer = null;
+      applyPollResponse(error ? null : response);
     });
   }
 
@@ -142,14 +124,14 @@ function createController(runtime, options) {
     return isCurrentCycle(expectedModeId, expectedCycleId) && requestId === expectedRequestId;
   }
 
-  function responseValue(response) {
+  function applyPollResponse(response) {
     var body = response && typeof response.body === 'string' ? response.body : response;
-    return typeof body === 'string' && body.trim() === 'KEEP_ON' ? 'KEEP_ON' : 'DEFAULT';
+    keepOn = typeof body === 'string' && body.trim() === 'KEEP_ON';
+    if (!keepOn && deadlineTimer === null && busOn) turnBusOff();
   }
 
-  function applyPollResult(value) {
-    keepOn = value === 'KEEP_ON';
-    if (!keepOn && deadlineTimer === null && busOn) turnBusOff();
+  function selectMode(nextMode) {
+    if (initialized && mode !== nextMode) setMode(nextMode);
   }
 
   return {
@@ -162,15 +144,9 @@ function createController(runtime, options) {
         applyMode();
       });
     },
-    shortPress: function () {
-      if (initialized && (mode === TIMER || mode === MANUAL_FULL)) setMode(MANUAL_12V);
-    },
-    doublePress: function () {
-      if (initialized && (mode === TIMER || mode === MANUAL_12V)) setMode(MANUAL_FULL);
-    },
-    longPress: function () {
-      if (initialized && (mode === MANUAL_12V || mode === MANUAL_FULL)) setMode(TIMER);
-    }
+    shortPress: function () { selectMode(MANUAL_12V); },
+    doublePress: function () { selectMode(MANUAL_FULL); },
+    longPress: function () { selectMode(TIMER); }
   };
 }
 

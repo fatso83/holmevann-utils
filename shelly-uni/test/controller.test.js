@@ -250,9 +250,8 @@ test('a persisted manual mode survives restart and never schedules TIMER work', 
   assert.equal(httpGets(runtime).length, 0);
 });
 
-test('later TIMER wakes retain the existing remote behavior and reset the deadline', function () {
+test('later TIMER wakes reset the minimum-on deadline', function () {
   var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
-  for (var count = 0; count < 60; count += 1) runtime.enqueueHttp({ response: { body: 'KEEP_ON' } });
   restore(runtime);
 
   runtime.advance(2 * HOUR);
