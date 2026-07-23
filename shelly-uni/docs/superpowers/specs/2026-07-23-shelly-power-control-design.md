@@ -13,20 +13,34 @@ Node.js.
 - `input:0` is a momentary button configured as Button + Detached.
 - `switch:0` controls the BatteryProtect and common 12 V load bus.
 - `switch:1` controls the inverter remote input.
-- A `single_push` on `input:0` toggles the selected mode.
+- A short press uses a one-second recognition window: a single press selects
+  MANUAL_12V and a double press selects MANUAL_FULL. A two-second long press
+  selects TIMER. The Shelly adapter normalizes hardware events to these
+  controller actions.
 
 ## Modes
 
-### FULL_ON
+### MANUAL_FULL
 
+- Entered by a double press completed within one second while in TIMER/off.
 - The 12 V bus is on.
 - The inverter is on only after the bus has been commanded on.
-- No periodic wake or remote polling runs.
+- No periodic wake or remote polling runs; outstanding TIMER callbacks are
+  invalidated.
 
-### TIMER
+### MANUAL_12V
 
-- The inverter is always off.
-- The 12 V bus wakes immediately when TIMER starts, then once every 60 minutes.
+- Entered by a single press while in TIMER/off.
+- The 12 V bus is on and the inverter is off.
+- No periodic wake or remote polling runs; outstanding TIMER callbacks are
+  invalidated.
+
+### TIMER (off and scheduled)
+
+- Entered by holding the button for two seconds from either manual mode.
+- The inverter and 12 V bus are immediately off; the inverter remains off.
+- The first 12 V wake happens 60 minutes after entering TIMER, then once every
+  60 minutes.
 - Each wake keeps the bus on for a minimum of 10 minutes.
 - While the bus is on, poll `https://api.holmevann.no/power/remote` every 60
   seconds.
@@ -55,8 +69,8 @@ Node.js.
   must match the mode and cycle for which it was created (and HTTP replies must
   also match their request token). Thus a newer poll cannot invalidate the
   cycle's minimum-off timer, while callbacks from old modes/cycles are harmless.
-- Repeated button events are processed as repeated toggles; they must neither
-  duplicate timers nor permit an old cycle to change current outputs.
+- Button recognition must not duplicate timers or permit an old cycle to change
+  current outputs.
 
 ## Implementation boundaries
 

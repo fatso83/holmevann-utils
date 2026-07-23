@@ -138,7 +138,7 @@ git add src/controller.js test/controller.test.js
 git commit -m "feat: add timer wake and remote polling"
 ```
 
-### Task 4: Test stale work, restarts, and repeated button events
+### Task 4: Replace toggle controls with manual/TIMER button states
 
 **Files:**
 - Modify: `test/controller.test.js`
@@ -146,7 +146,10 @@ git commit -m "feat: add timer wake and remote polling"
 
 - [ ] **Step 1: Add failing safety regression tests**
 
-Test that a prior TIMER deadline/reply cannot alter FULL_ON after a toggle; an old HTTP `KEEP_ON` cannot revive a newer DEFAULT cycle; a new controller restored from persisted FULL_ON commands bus before inverter; and rapid repeated `single_push` events leave only current-mode timers effective.
+Test that a short press from TIMER selects MANUAL_12V; a qualifying double press
+selects MANUAL_FULL; a long press enters TIMER/off and schedules its first wake
+60 minutes later; manual modes ignore TIMER callbacks; and stale timer/HTTP
+callbacks cannot change the current state.
 
 - [ ] **Step 2: Run the regression tests to verify failure**
 
@@ -156,7 +159,12 @@ Expected: FAIL with stale callbacks changing output or duplicate active schedule
 
 - [ ] **Step 3: Implement only missing token/cancellation safeguards**
 
-Cancel known timers on transition where possible; retain identity guards on every callback for behavior correctness even if cancellation races. Do not add retries, backoff, or unrequested state.
+Replace FULL_ON with MANUAL_12V and MANUAL_FULL. Delay a single press for a
+one-second double-press window; accept a second press in that window as
+MANUAL_FULL. Enter TIMER/off on long press, cancel known timers on every
+transition where possible, and retain identity guards on every callback for
+behavior correctness even if cancellation races. Do not add retries, backoff,
+or unrequested state.
 
 - [ ] **Step 4: Run all tests**
 
