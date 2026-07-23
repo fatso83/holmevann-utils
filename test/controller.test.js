@@ -5,122 +5,28 @@ var assert = require('node:assert/strict');
 var createController = require('../src/controller');
 var FakeRuntime = require('./fake-runtime');
 
-test('start waits for the asynchronous KVS read before commanding outputs', function () {
-  var runtime = new FakeRuntime({ kvs: { power_mode: 'FULL_ON' } });
-  var controller = createController(runtime);
+var MANUAL_12V = 'MANUAL_12V';
+var MANUAL_FULL = 'MANUAL_FULL';
+var TIMER = 'TIMER';
+var HOUR = 60 * 60 * 1000;
 
-  controller.start();
-  runtime.advance(0);
-  assert.deepEqual(runtime.outputHistory(), []);
-
-  runtime.resolveKvsGet();
-  runtime.advance(0);
-  assert.deepEqual(runtime.outputHistory(), [
-    { id: 0, on: true },
-    { id: 1, on: true }
-  ]);
-});
-
-test('single push before KVS restore does not command outputs or overwrite the restored mode', function () {
-  var runtime = new FakeRuntime({ kvs: { power_mode: 'FULL_ON' } });
-  var controller = createController(runtime);
-
-  controller.start();
-  runtime.emitSinglePush();
-  runtime.advance(0);
-
-  assert.deepEqual(runtime.outputHistory(), []);
-  assert.deepEqual(runtime.commandHistory().filter(function (command) {
-    return command.type === 'kvsSet';
-  }), []);
-
-  runtime.resolveKvsGet();
-  runtime.advance(0);
-
-  assert.deepEqual(runtime.outputHistory(), [
-    { id: 0, on: true },
-    { id: 1, on: true }
-  ]);
-});
-
-test('start defaults missing KVS mode to TIMER with inverter-off then bus-on ordering', function () {
-  var runtime = new FakeRuntime();
-  var controller = createController(runtime);
-
-  controller.start();
-  runtime.resolveKvsGet();
-  runtime.advance(0);
-
-  assert.deepEqual(runtime.outputHistory(), [
-    { id: 1, on: false },
-    { id: 0, on: true }
-  ]);
-});
-
-test('start restores persisted FULL_ON mode with bus-on then inverter-on ordering', function () {
-  var runtime = new FakeRuntime({ kvs: { power_mode: 'FULL_ON' } });
-  var controller = createController(runtime);
-
-  controller.start();
-  runtime.resolveKvsGet();
-  runtime.advance(0);
-
-  assert.deepEqual(runtime.outputHistory(), [
-    { id: 0, on: true },
-    { id: 1, on: true }
-  ]);
-});
-
-test('start falls back to TIMER when KVS returns an invalid mode or error', function () {
-  var invalidRuntime = new FakeRuntime({ kvs: { power_mode: 'UNKNOWN' } });
-  createController(invalidRuntime).start();
-  invalidRuntime.resolveKvsGet();
-  invalidRuntime.advance(0);
-
-  var errorRuntime = new FakeRuntime();
-  createController(errorRuntime).start();
-  errorRuntime.resolveKvsGet(null, 'read failed');
-  errorRuntime.advance(0);
-
-  var expected = [{ id: 1, on: false }, { id: 0, on: true }];
-  assert.deepEqual(invalidRuntime.outputHistory(), expected);
-  assert.deepEqual(errorRuntime.outputHistory(), expected);
-});
-
-test('single push toggles modes, persists each selection, and uses safe output ordering', function () {
-  var runtime = new FakeRuntime({ kvs: { power_mode: 'TIMER' } });
-  var controller = createController(runtime);
-
-  controller.start();
-  runtime.resolveKvsGet();
-  runtime.advance(0);
-  runtime.emitSinglePush();
-  runtime.emitSinglePush();
-  runtime.advance(0);
-
-  assert.deepEqual(runtime.outputHistory(), [
-    { id: 1, on: false },
-    { id: 0, on: true },
-    { id: 0, on: true },
-    { id: 1, on: true },
-    { id: 1, on: false },
-    { id: 0, on: true }
-  ]);
-  assert.deepEqual(runtime.commandHistory().filter(function (command) {
-    return command.type === 'kvsSet';
-  }), [
-    { type: 'kvsSet', key: 'power_mode', value: 'FULL_ON' },
-    { type: 'kvsSet', key: 'power_mode', value: 'TIMER' }
-  ]);
-  assert.deepEqual(runtime.kvsSnapshot(), { power_mode: 'TIMER' });
-});
-
-function restoreTimer(runtime) {
+function start(runtime) {
   var controller = createController(runtime);
   controller.start();
+  return controller;
+}
+
+function restore(runtime) {
+  var controller = start(runtime);
   runtime.resolveKvsGet();
   runtime.advance(0);
   return controller;
+}
+
+function kvsWrites(runtime) {
+  return runtime.commandHistory().filter(function (command) {
+    return command.type === 'kvsSet';
+  });
 }
 
 function httpGets(runtime) {
@@ -129,29 +35,116 @@ function httpGets(runtime) {
   });
 }
 
-test('TIMER wakes immediately after restore and starts a fresh cycle every 60 minutes', function () {
-  var runtime = new FakeRuntime({ kvs: { power_mode: 'TIMER' } });
-  restoreTimer(runtime);
+test('start waits for asynchronous KVS restoration before commanding outputs', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: MANUAL_FULL } });
+  start(runtime);
+  runtime.advance(0);
+  assert.deepEqual(runtime.outputHistory(), []);
 
-  assert.deepEqual(runtime.outputHistory(), [{ id: 1, on: false }, { id: 0, on: true }]);
-  runtime.advance(599999);
-  assert.equal(runtime.outputState()[0], true);
-  runtime.advance(1);
-  assert.equal(runtime.outputState()[0], false);
-  runtime.advance(50 * 60000);
-  assert.equal(runtime.outputState()[0], true);
-  runtime.advance(600000);
-  assert.equal(runtime.outputState()[0], false);
+  runtime.resolveKvsGet();
+  runtime.advance(0);
+  assert.deepEqual(runtime.outputHistory(), [{ id: 0, on: true }, { id: 1, on: true }]);
 });
 
-test('TIMER polls after 60 seconds and repeats only while its bus is on', function () {
-  var runtime = new FakeRuntime({ kvs: { power_mode: 'TIMER' } });
-  restoreTimer(runtime);
+test('missing, legacy, invalid, and failed KVS restoration enter TIMER off and schedule the first wake', function () {
+  [undefined, 'FULL_ON', 'UNKNOWN', null].forEach(function (savedMode) {
+    var runtime = savedMode === undefined ? new FakeRuntime() : new FakeRuntime({ kvs: { power_mode: savedMode } });
+    start(runtime);
+    if (savedMode === null) runtime.resolveKvsGet(null, 'read failed');
+    else runtime.resolveKvsGet();
+    runtime.advance(0);
 
-  runtime.advance(59999);
+    assert.deepEqual(runtime.outputHistory(), [{ id: 1, on: false }, { id: 0, on: false }]);
+    runtime.advance(HOUR - 1);
+    assert.deepEqual(runtime.outputState(), { 0: false, 1: false });
+    runtime.advance(1);
+    assert.deepEqual(runtime.outputState(), { 0: true, 1: false });
+  });
+});
+
+test('restores each persisted manual selection with safe ordering', function () {
+  var fullRuntime = new FakeRuntime({ kvs: { power_mode: MANUAL_FULL } });
+  restore(fullRuntime);
+  assert.deepEqual(fullRuntime.outputHistory(), [{ id: 0, on: true }, { id: 1, on: true }]);
+
+  var busRuntime = new FakeRuntime({ kvs: { power_mode: MANUAL_12V } });
+  restore(busRuntime);
+  assert.deepEqual(busRuntime.outputHistory(), [{ id: 1, on: false }, { id: 0, on: true }]);
+});
+
+test('semantic presses before restore are ignored', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: MANUAL_12V } });
+  var controller = start(runtime);
+  controller.doublePress();
+  controller.longPress();
+  controller.shortPress();
+  assert.deepEqual(kvsWrites(runtime), []);
+
+  runtime.resolveKvsGet();
+  runtime.advance(0);
+  assert.deepEqual(runtime.outputState(), { 0: true, 1: false });
+});
+
+test('shortPress selects and persists MANUAL_12V', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
+  var controller = restore(runtime);
+  controller.shortPress();
+  runtime.advance(0);
+
+  assert.deepEqual(runtime.outputState(), { 0: true, 1: false });
+  assert.deepEqual(kvsWrites(runtime), [{ type: 'kvsSet', key: 'power_mode', value: MANUAL_12V }]);
+});
+
+test('doublePress selects and persists MANUAL_FULL with bus before inverter', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
+  var controller = restore(runtime);
+  controller.doublePress();
+  runtime.advance(0);
+
+  assert.deepEqual(runtime.outputHistory().slice(-2), [{ id: 0, on: true }, { id: 1, on: true }]);
+  assert.deepEqual(kvsWrites(runtime), [{ type: 'kvsSet', key: 'power_mode', value: MANUAL_FULL }]);
+});
+
+test('longPress enters TIMER off, persists it, and first wakes exactly one hour later', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: MANUAL_FULL } });
+  var controller = restore(runtime);
+  controller.longPress();
+  runtime.advance(0);
+
+  assert.deepEqual(runtime.outputHistory().slice(-2), [{ id: 1, on: false }, { id: 0, on: false }]);
+  assert.deepEqual(kvsWrites(runtime), [{ type: 'kvsSet', key: 'power_mode', value: TIMER }]);
+  runtime.advance(HOUR - 1);
+  assert.deepEqual(runtime.outputState(), { 0: false, 1: false });
+  runtime.advance(1);
+  assert.deepEqual(runtime.outputState(), { 0: true, 1: false });
+});
+
+test('TIMER polling and deadline behavior start only after its scheduled wake', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
+  for (var count = 0; count < 10; count += 1) runtime.enqueueHttp({ response: { body: '  KEEP_ON\n' } });
+  var controller = restore(runtime);
+
+  runtime.advance(HOUR - 1);
   assert.equal(httpGets(runtime).length, 0);
   runtime.advance(1);
-  assert.deepEqual(httpGets(runtime), [{ type: 'httpGet', url: 'https://api.holmevann.no/power/remote' }]);
+  runtime.advance(60000);
+  assert.equal(httpGets(runtime).length, 1);
+  runtime.advance(9 * 60000);
+  assert.equal(runtime.outputState()[0], true);
+
+  controller.longPress();
+  runtime.advance(0);
+  assert.deepEqual(runtime.outputState(), { 0: false, 1: false });
+});
+
+test('TIMER polls every minute only while its scheduled-wake bus is on', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
+  restore(runtime);
+
+  runtime.advance(HOUR + 59999);
+  assert.equal(httpGets(runtime).length, 0);
+  runtime.advance(1);
+  assert.equal(httpGets(runtime).length, 1);
   runtime.advance(9 * 60000);
   assert.equal(runtime.outputState()[0], false);
   assert.equal(httpGets(runtime).length, 9);
@@ -159,86 +152,68 @@ test('TIMER polls after 60 seconds and repeats only while its bus is on', functi
   assert.equal(httpGets(runtime).length, 9);
 });
 
-test('only a trimmed KEEP_ON response keeps TIMER bus on beyond its 10 minute deadline', function () {
-  var runtime = new FakeRuntime({ kvs: { power_mode: 'TIMER' } });
-  for (var count = 0; count < 10; count += 1) {
-    runtime.enqueueHttp({ response: { body: '  KEEP_ON\n' } });
-  }
-  restoreTimer(runtime);
-
-  runtime.advance(60000);
-  assert.equal(httpGets(runtime).length, 1);
-  runtime.advance(540000);
-  assert.equal(runtime.outputState()[0], true);
-});
-
-test('the 60 minute wake resets the 10 minute deadline even when the prior cycle was held', function () {
-  var runtime = new FakeRuntime({ kvs: { power_mode: 'TIMER' } });
-  for (var count = 0; count < 60; count += 1) {
-    runtime.enqueueHttp({ response: { body: 'KEEP_ON' } });
-  }
-  restoreTimer(runtime);
-
-  runtime.advance(60 * 60000);
-  assert.equal(runtime.outputState()[0], true);
-  runtime.advance(10 * 60000);
-  assert.equal(runtime.outputState()[0], false);
-});
-
-test('DEFAULT, malformed, error, and hung poll results use the deadline default', function () {
+test('DEFAULT, malformed, error, and hung scheduled-wake poll results use the deadline default', function () {
   [
     { response: { body: ' DEFAULT ' } },
     { response: { body: 'keep_on' } },
     { error: 'network down' },
     { hang: true }
   ].forEach(function (outcome) {
-    var runtime = new FakeRuntime({ kvs: { power_mode: 'TIMER' } });
+    var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
     runtime.enqueueHttp(outcome);
-    restoreTimer(runtime);
-    runtime.advance(600000);
+    restore(runtime);
+    runtime.advance(HOUR + 10 * 60000);
     assert.equal(runtime.outputState()[0], false);
   });
 });
 
-test('a request times out after 30 seconds and a late KEEP_ON reply is ignored', function () {
-  var runtime = new FakeRuntime({ kvs: { power_mode: 'TIMER' } });
+test('a scheduled-wake request times out after 30 seconds and ignores a late KEEP_ON reply', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
   runtime.enqueueHttp({ delay: 31000, response: { body: 'KEEP_ON' } });
-  restoreTimer(runtime);
+  restore(runtime);
 
-  runtime.advance(60000);
-  runtime.advance(30000);
-  runtime.advance(510000);
+  runtime.advance(HOUR + 60000 + 30000);
+  runtime.advance(9 * 60000);
   assert.equal(runtime.outputState()[0], false);
   runtime.advance(1000);
   assert.equal(runtime.outputState()[0], false);
 });
 
-test('a mode change makes pending TIMER callbacks harmless and FULL_ON creates no timer polling', function () {
-  var runtime = new FakeRuntime({ kvs: { power_mode: 'TIMER' } });
+test('manual modes cancel and ignore stale TIMER wake, poll, deadline, and HTTP callbacks', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
   runtime.enqueueHttp({ delay: 31000, response: { body: 'KEEP_ON' } });
-  var controller = restoreTimer(runtime);
+  var controller = restore(runtime);
+  var staleWake = runtime.timers.filter(function (timer) { return timer.repeat && timer.delay === HOUR; })[0];
 
-  runtime.advance(60000);
-  runtime.emitSinglePush();
-  runtime.advance(0);
-  assert.deepEqual(runtime.outputState(), { 0: true, 1: true });
-  runtime.advance(3600000);
-  assert.equal(httpGets(runtime).length, 1);
-  assert.deepEqual(runtime.outputState(), { 0: true, 1: true });
-});
-
-test('a stale TIMER wake cannot start an extra cycle after returning from FULL_ON', function () {
-  var runtime = new FakeRuntime({ kvs: { power_mode: 'TIMER' } });
-  restoreTimer(runtime);
-  var staleWake = runtime.timers.filter(function (timer) {
-    return timer.repeat && timer.delay === 60 * 60 * 1000;
-  })[0];
-
-  runtime.emitSinglePush();
-  runtime.emitSinglePush();
+  runtime.advance(HOUR + 60000);
+  var staleTimers = runtime.timers.slice();
+  controller.shortPress();
   runtime.advance(0);
   var before = runtime.outputHistory();
   staleWake.callback();
+  staleTimers.forEach(function (timer) { timer.callback(); });
+  runtime.advance(2 * HOUR);
 
   assert.deepEqual(runtime.outputHistory(), before);
+  assert.deepEqual(runtime.outputState(), { 0: true, 1: false });
+  assert.equal(httpGets(runtime).length, 1);
+});
+
+test('a persisted manual mode survives restart and never schedules TIMER work', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: MANUAL_FULL } });
+  restore(runtime);
+  runtime.advance(2 * HOUR);
+  assert.deepEqual(runtime.outputState(), { 0: true, 1: true });
+  assert.equal(httpGets(runtime).length, 0);
+});
+
+test('later TIMER wakes retain the existing remote behavior and reset the deadline', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: TIMER } });
+  for (var count = 0; count < 60; count += 1) runtime.enqueueHttp({ response: { body: 'KEEP_ON' } });
+  restore(runtime);
+
+  runtime.advance(2 * HOUR);
+  assert.equal(runtime.outputState()[0], true);
+  runtime.advance(10 * 60000);
+  assert.equal(runtime.outputState()[0], false);
 });

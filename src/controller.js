@@ -1,6 +1,7 @@
 'use strict';
 
-var FULL_ON = 'FULL_ON';
+var MANUAL_12V = 'MANUAL_12V';
+var MANUAL_FULL = 'MANUAL_FULL';
 var TIMER = 'TIMER';
 var POWER_MODE_KEY = 'power_mode';
 var WAKE_INTERVAL_MS = 60 * 60 * 1000;
@@ -18,73 +19,70 @@ function createController(runtime) {
   var wakeTimer = null;
   var deadlineTimer = null;
   var pollTimer = null;
-  var requestTimeoutTimer = null;
+  var requestTimeoutTimers = [];
   var busOn = false;
   var keepOn = false;
-
-  runtime.subscribe(function (event) {
-    if (initialized && event && event.component === 'input:0' && event.info && event.info.event === 'single_push') {
-      mode = mode === FULL_ON ? TIMER : FULL_ON;
-      runtime.kvsSet(POWER_MODE_KEY, mode);
-      applyMode();
-    }
-  });
-
-  function applyMode() {
-    modeId += 1;
-    stopTimerMode();
-    if (mode === FULL_ON) {
-      runtime.setOutput(0, true);
-      runtime.setOutput(1, true);
-      return;
-    }
-    runtime.setOutput(1, false);
-    var thisModeId = modeId;
-    wakeTimer = runtime.setTimer(WAKE_INTERVAL_MS, true, function () {
-      if (isCurrentMode(thisModeId)) wake();
-    });
-    wake();
-  }
-
-  function stopTimerMode() {
-    wakeTimer = clearTimer(wakeTimer);
-    deadlineTimer = clearTimer(deadlineTimer);
-    pollTimer = clearTimer(pollTimer);
-    requestTimeoutTimer = clearTimer(requestTimeoutTimer);
-    cycleId += 1;
-    requestId += 1;
-    busOn = false;
-    keepOn = false;
-  }
 
   function clearTimer(timerId) {
     if (timerId !== null) runtime.clearTimer(timerId);
     return null;
   }
 
-  function wake() {
-    var thisModeId = modeId;
-    var thisCycleId = ++cycleId;
-    keepOn = false;
-    turnBusOn();
-    deadlineTimer = clearTimer(deadlineTimer);
-    deadlineTimer = runtime.setTimer(MINIMUM_ON_MS, false, function () {
-      if (!isCurrentCycle(thisModeId, thisCycleId)) return;
-      deadlineTimer = null;
-      if (!keepOn) turnBusOff();
-    });
-    pollTimer = clearTimer(pollTimer);
-    pollTimer = runtime.setTimer(POLL_INTERVAL_MS, true, function () {
-      if (isCurrentCycle(thisModeId, thisCycleId) && busOn) poll(thisModeId, thisCycleId);
-    });
+  function clearRequestTimeouts() {
+    requestTimeoutTimers.forEach(function (timerId) { runtime.clearTimer(timerId); });
+    requestTimeoutTimers = [];
   }
 
-  function isCurrentCycle(expectedModeId, expectedCycleId) {
-    return isCurrentMode(expectedModeId) && cycleId === expectedCycleId;
+  function stopTimerMode() {
+    wakeTimer = clearTimer(wakeTimer);
+    deadlineTimer = clearTimer(deadlineTimer);
+    pollTimer = clearTimer(pollTimer);
+    clearRequestTimeouts();
+    cycleId += 1;
+    requestId += 1;
+    busOn = false;
+    keepOn = false;
+  }
+
+  function setMode(nextMode) {
+    mode = nextMode;
+    runtime.kvsSet(POWER_MODE_KEY, mode);
+    applyMode();
+  }
+
+  function applyMode() {
+    modeId += 1;
+    stopTimerMode();
+
+    if (mode === MANUAL_FULL) {
+      runtime.setOutput(0, true);
+      runtime.setOutput(1, true);
+      return;
+    }
+
+    if (mode === MANUAL_12V) {
+      runtime.setOutput(1, false);
+      runtime.setOutput(0, true);
+      return;
+    }
+
+    runtime.setOutput(1, false);
+    runtime.setOutput(0, false);
+    scheduleWake(modeId);
+  }
+
+  function scheduleWake(expectedModeId) {
+    wakeTimer = runtime.setTimer(WAKE_INTERVAL_MS, true, function () {
+      if (isCurrentMode(expectedModeId)) wake(expectedModeId);
+    });
   }
 
   function isCurrentMode(expectedModeId) {
     return mode === TIMER && modeId === expectedModeId;
+  }
+
+  function isCurrentCycle(expectedModeId, expectedCycleId) {
+    return isCurrentMode(expectedModeId) && cycleId === expectedCycleId;
   }
 
   function turnBusOn() {
@@ -98,19 +96,40 @@ function createController(runtime) {
     pollTimer = clearTimer(pollTimer);
   }
 
+  function wake(expectedModeId) {
+    var thisCycleId = ++cycleId;
+    keepOn = false;
+    turnBusOn();
+    deadlineTimer = clearTimer(deadlineTimer);
+    deadlineTimer = runtime.setTimer(MINIMUM_ON_MS, false, function () {
+      if (!isCurrentCycle(expectedModeId, thisCycleId)) return;
+      deadlineTimer = null;
+      if (!keepOn) turnBusOff();
+    });
+    pollTimer = clearTimer(pollTimer);
+    pollTimer = runtime.setTimer(POLL_INTERVAL_MS, true, function () {
+      if (isCurrentCycle(expectedModeId, thisCycleId) && busOn) poll(expectedModeId, thisCycleId);
+    });
+  }
+
+  function removeRequestTimeout(timerId) {
+    requestTimeoutTimers = requestTimeoutTimers.filter(function (id) { return id !== timerId; });
+  }
+
   function poll(expectedModeId, expectedCycleId) {
     var thisRequestId = ++requestId;
-    requestTimeoutTimer = clearTimer(requestTimeoutTimer);
-    requestTimeoutTimer = runtime.setTimer(REQUEST_TIMEOUT_MS, false, function () {
+    var timeoutTimer = runtime.setTimer(REQUEST_TIMEOUT_MS, false, function () {
+      removeRequestTimeout(timeoutTimer);
       if (isCurrentRequest(expectedModeId, expectedCycleId, thisRequestId)) {
-        requestTimeoutTimer = null;
         requestId += 1;
         applyPollResult('DEFAULT');
       }
     });
+    requestTimeoutTimers.push(timeoutTimer);
     runtime.httpGet(REMOTE_URL, function (error, response) {
       if (!isCurrentRequest(expectedModeId, expectedCycleId, thisRequestId)) return;
-      requestTimeoutTimer = clearTimer(requestTimeoutTimer);
+      runtime.clearTimer(timeoutTimer);
+      removeRequestTimeout(timeoutTimer);
       applyPollResult(error ? 'DEFAULT' : responseValue(response));
     });
   }
@@ -132,16 +151,26 @@ function createController(runtime) {
   return {
     start: function () {
       runtime.kvsGet(POWER_MODE_KEY, function (error, result) {
-        mode = !error && result && (result.value === FULL_ON || result.value === TIMER)
+        mode = !error && result && (result.value === MANUAL_12V || result.value === MANUAL_FULL || result.value === TIMER)
           ? result.value
           : TIMER;
         initialized = true;
         applyMode();
       });
+    },
+    shortPress: function () {
+      if (initialized) setMode(MANUAL_12V);
+    },
+    doublePress: function () {
+      if (initialized) setMode(MANUAL_FULL);
+    },
+    longPress: function () {
+      if (initialized) setMode(TIMER);
     }
   };
 }
 
 module.exports = createController;
-module.exports.FULL_ON = FULL_ON;
+module.exports.MANUAL_12V = MANUAL_12V;
+module.exports.MANUAL_FULL = MANUAL_FULL;
 module.exports.TIMER = TIMER;
