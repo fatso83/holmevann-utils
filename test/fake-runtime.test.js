@@ -2,6 +2,8 @@
 
 var test = require('node:test');
 var assert = require('node:assert/strict');
+var childProcess = require('node:child_process');
+var path = require('node:path');
 var FakeRuntime = require('./fake-runtime');
 
 test('runs virtual timers by due time then registration order', function () {
@@ -29,6 +31,25 @@ test('cancels virtual timers and repeats only while scheduled', function () {
   assert.equal(calls, 3);
 });
 
+test('schedules a zero-delay repeating timer at least one virtual millisecond apart', function () {
+  var runtimePath = path.join(__dirname, 'fake-runtime.js');
+  var program = [
+    "var FakeRuntime = require(" + JSON.stringify(runtimePath) + ");",
+    'var runtime = new FakeRuntime();',
+    'var calls = 0;',
+    'runtime.setTimer(0, true, function () { calls += 1; });',
+    'runtime.advance(1);',
+    'process.stdout.write(String(calls));'
+  ].join('');
+  var result = childProcess.spawnSync(process.execPath, ['-e', program], {
+    encoding: 'utf8',
+    timeout: 500
+  });
+
+  assert.equal(result.status, 0, result.error && result.error.message);
+  assert.equal(result.stdout, '2');
+});
+
 test('records output commands and maintains output state', function () {
   var runtime = new FakeRuntime();
 
@@ -42,11 +63,15 @@ test('records output commands and maintains output state', function () {
   assert.deepEqual(runtime.outputState(), { 0: true, 1: false });
 });
 
-test('delivers KVS reads asynchronously and snapshots KVS writes', function () {
+test('holds KVS reads until explicitly resolved and then delivers them asynchronously', function () {
   var runtime = new FakeRuntime({ kvs: { power_mode: 'TIMER' } });
   var result;
 
   runtime.kvsGet('power_mode', function (error, value) { result = [error, value]; });
+  assert.equal(result, undefined);
+  runtime.advance(0);
+  assert.equal(result, undefined);
+  runtime.resolveKvsGet({ value: 'TIMER' });
   assert.equal(result, undefined);
   runtime.advance(0);
   assert.deepEqual(result, [null, { value: 'TIMER' }]);

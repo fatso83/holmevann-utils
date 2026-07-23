@@ -11,6 +11,7 @@ function FakeRuntime(options) {
   this.outputsHistory = [];
   this.commands = [];
   this.kvs = copy(options.kvs || {});
+  this.pendingKvsGets = [];
   this.eventHandlers = [];
   this.httpOutcomes = [];
   this.logs = [];
@@ -19,7 +20,7 @@ function FakeRuntime(options) {
 FakeRuntime.prototype.setTimer = function (delay, repeat, callback) {
   var timer = {
     id: this.nextTimerId++,
-    delay: Math.max(0, Number(delay) || 0),
+    delay: repeat ? Math.max(1, Number(delay) || 0) : Math.max(0, Number(delay) || 0),
     due: this.now + Math.max(0, Number(delay) || 0),
     repeat: Boolean(repeat),
     callback: callback,
@@ -97,10 +98,18 @@ FakeRuntime.prototype.commandHistory = function () {
 };
 
 FakeRuntime.prototype.kvsGet = function (key, callback) {
-  var self = this;
   this.commands.push({ type: 'kvsGet', key: key });
+  this.pendingKvsGets.push({ key: key, callback: callback });
+};
+
+FakeRuntime.prototype.resolveKvsGet = function (result, error) {
+  var request = this.pendingKvsGets.shift();
+  if (!request) throw new Error('No KVS get is pending');
+  if (arguments.length === 0) {
+    result = Object.prototype.hasOwnProperty.call(this.kvs, request.key) ? { value: this.kvs[request.key] } : { value: null };
+  }
   this.setTimer(0, false, function () {
-    callback(null, Object.prototype.hasOwnProperty.call(self.kvs, key) ? { value: self.kvs[key] } : { value: null });
+    request.callback(error || null, error ? null : result);
   });
 };
 
