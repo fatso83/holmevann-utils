@@ -159,13 +159,13 @@ function createController(runtime) {
       });
     },
     shortPress: function () {
-      if (initialized && mode === TIMER) setMode(MANUAL_12V);
+      if (initialized) setMode(MANUAL_12V);
     },
     doublePress: function () {
-      if (initialized && mode === TIMER) setMode(MANUAL_FULL);
+      if (initialized) setMode(MANUAL_FULL);
     },
     longPress: function () {
-      if (initialized && (mode === MANUAL_12V || mode === MANUAL_FULL)) setMode(TIMER);
+      if (initialized) setMode(TIMER);
     }
   };
 }
