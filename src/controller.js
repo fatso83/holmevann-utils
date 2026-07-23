@@ -6,9 +6,10 @@ var POWER_MODE_KEY = 'power_mode';
 
 function createController(runtime) {
   var mode = TIMER;
+  var initialized = false;
 
   runtime.subscribe(function (event) {
-    if (event && event.component === 'input:0' && event.info && event.info.event === 'single_push') {
+    if (initialized && event && event.component === 'input:0' && event.info && event.info.event === 'single_push') {
       mode = mode === FULL_ON ? TIMER : FULL_ON;
       runtime.kvsSet(POWER_MODE_KEY, mode);
       applyMode();
@@ -31,6 +32,7 @@ function createController(runtime) {
         mode = !error && result && (result.value === FULL_ON || result.value === TIMER)
           ? result.value
           : TIMER;
+        initialized = true;
         applyMode();
       });
     }

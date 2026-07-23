@@ -21,6 +21,28 @@ test('start waits for the asynchronous KVS read before commanding outputs', func
   ]);
 });
 
+test('single push before KVS restore does not command outputs or overwrite the restored mode', function () {
+  var runtime = new FakeRuntime({ kvs: { power_mode: 'FULL_ON' } });
+  var controller = createController(runtime);
+
+  controller.start();
+  runtime.emitSinglePush();
+  runtime.advance(0);
+
+  assert.deepEqual(runtime.outputHistory(), []);
+  assert.deepEqual(runtime.commandHistory().filter(function (command) {
+    return command.type === 'kvsSet';
+  }), []);
+
+  runtime.resolveKvsGet();
+  runtime.advance(0);
+
+  assert.deepEqual(runtime.outputHistory(), [
+    { id: 0, on: true },
+    { id: 1, on: true }
+  ]);
+});
+
 test('start defaults missing KVS mode to TIMER with inverter-off then bus-on ordering', function () {
   var runtime = new FakeRuntime();
   var controller = createController(runtime);
